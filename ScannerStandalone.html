@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Event Check-in Scanner</title>
+  <style>
+    body {
+      font-family: -apple-system, Roboto, Arial, sans-serif;
+      background: #111827;
+      color: #fff;
+      margin: 0;
+      padding: 16px;
+      text-align: center;
+    }
+    h2 { margin: 8px 0 16px; }
+    #reader { width: 100%; max-width: 400px; margin: 0 auto; border-radius: 12px; overflow: hidden; }
+    #result {
+      margin-top: 20px;
+      padding: 16px;
+      border-radius: 12px;
+      font-size: 18px;
+      min-height: 60px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+    }
+    .success { background: #14532d; }
+    .error { background: #7f1d1d; }
+    .warn { background: #78350f; }
+    .idle { background: #1f2937; color: #9ca3af; }
+    .name { font-size: 22px; font-weight: bold; margin-bottom: 4px; }
+    .sub { font-size: 14px; opacity: 0.85; }
+    #rescan {
+      margin-top: 16px;
+      padding: 10px 24px;
+      border-radius: 8px;
+      border: none;
+      background: #2563eb;
+      color: #fff;
+      font-size: 16px;
+    }
+  </style>
+</head>
+<body>
+  <h2>Event Check-in Scanner</h2>
+  <div id="reader"></div>
+  <div id="result" class="idle">Point camera at a Registration QR code</div>
+  <button id="rescan" style="display:none;">Scan Next</button>
+
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <script>
+    // ⚠️ REQUIRED: paste your Apps Script Web App URL here (ends in /exec)
+    const WEB_APP_URL = 'PASTE_YOUR_DEPLOYED_WEB_APP_URL_HERE';
+
+    const resultDiv = document.getElementById('result');
+    const rescanBtn = document.getElementById('rescan');
+    let scanner;
+    let processing = false;
+
+    function setResult(cls, html) {
+      resultDiv.className = cls;
+      resultDiv.innerHTML = html;
+    }
+
+    function onScanSuccess(decodedText) {
+      if (processing) return;
+      processing = true;
+      scanner.pause(true);
+      setResult('idle', 'Checking...');
+
+      // Content-Type text/plain avoids a CORS preflight; server parses it as JSON.
+      fetch(WEB_APP_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ regId: decodedText })
+      })
+        .then(res => res.json())
+        .then(handleResponse)
+        .catch(handleError);
+    }
+
+    function handleResponse(res) {
+      if (res.status === 'success') {
+        setResult('success', `<div class="name">✅ ${res.name}</div><div class="sub">Checked in at ${res.time}</div>`);
+      } else if (res.status === 'already_checked_in') {
+        setResult('warn', `<div class="name">⚠ Already checked in</div><div class="sub">${res.name} — ${res.time}</div>`);
+      } else if (res.status === 'not_found') {
+        setResult('error', `<div class="name">❌ Not found</div><div class="sub">${res.regId || ''}</div>`);
+      } else {
+        setResult('error', `<div class="name">Error</div><div class="sub">${res.message || 'Unknown error'}</div>`);
+      }
+      rescanBtn.style.display = 'inline-block';
+    }
+
+    function handleError(err) {
+      setResult('error', `<div class="name">Network Error</div><div class="sub">${err.message}</div>`);
+      rescanBtn.style.display = 'inline-block';
+    }
+
+    function startScanner() {
+      scanner = new Html5Qrcode('reader');
+      scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: 250 },
+        onScanSuccess
+      ).catch(err => {
+        setResult('error', `<div class="name">Camera Error</div><div class="sub">${err}</div>`);
+      });
+    }
+
+    rescanBtn.addEventListener('click', () => {
+      processing = false;
+      rescanBtn.style.display = 'none';
+      setResult('idle', 'Point camera at a Registration QR code');
+      scanner.resume();
+    });
+
+    startScanner();
+  </script>
+</body>
+</html>
